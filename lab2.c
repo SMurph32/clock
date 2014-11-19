@@ -28,7 +28,7 @@ uint8_t check_index, mode = 0x00; //holds count for display 0; // Pointer into S
 static uint8_t enc=0; 
 int block = 0, press = 0, button=0, count_add=1;
 
-uint16_t adc_data;
+uint16_t adc_data, audio=0;
 
 uint16_t count=0;
 
@@ -169,9 +169,9 @@ ISR(TIMER0_OVF_vect){
 	read_enc(KNOB2);				//interpreate encoder data and increment/decrement count
 }
 ISR(TIMER2_COMP_vect){
-count--;
+	PORTE ^= (1 << 0);
+	PORTE ^= (1 << 1);
 }
-
 
 ISR(ADC_vect){
 
@@ -192,6 +192,14 @@ void int2_init(){
 	TCCR2 |= (1 << WGM21) | (1 << WGM20) | (1 << COM21) | (1 << CS21); 	//CTC mode, prescale by 128
 }
 
+void int3_init(){
+
+	TCCR3A |= (1<<COM3A1) | (1<<COM3A0) | (1<<WGM31) | (1 << WGM30);//fast pwm, set on match, clear@bottom, 
+	TCCR3B |= (1<<WGM33) | (1<< WGM32) | (1<<CS30);// | (1 << CS31);//use ICR1 as source for TOP, use clk/1
+	TCCR1C = 0x00;                            //no forced compare 
+	ICR1 = 0xBF00;                            //clear at 0xF000                               
+	ETIMSK = (1<<OCIE3A);                         //enable timer 3 interrupt on TOV
+}
 //debouncing switch checks for 12 consecutive signals from same button before returning 1
 void DebounceSwitch(){
 	uint8_t i,j;
@@ -236,7 +244,7 @@ void adc_init(){
 	PORTF |= (1 << 2);
 	DDRF &= ~(1 << 2);
 	ADCSR |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
-	ADCSR |= (1 << ADEN);
+	//	ADCSR |= (1 << ADEN);
 	ADCSR |= (1 << ADFR);
 	ADMUX = 0x62;
 	ADCSR |= (1 << ADIE);
@@ -250,6 +258,7 @@ uint8_t main()
 
 	int0_init();
 	int2_init();
+	int3_init();
 	//set port bits 4-7 B as outputs
 	spi_init();    //initalize SPI port
 	sei();         //enable interrupts before entering loop
@@ -263,7 +272,7 @@ uint8_t main()
 	SPDR = 0x01;
 	DDRF = 0xff;
 	DDRE = 0xff;
-	PORTE = 0x00;
+	PORTE = 0xff;
 
 	adc_init();
 	while(1)
@@ -300,9 +309,10 @@ uint8_t main()
 
 			button = -1;	//rell ISR that button has been read and can be changed
 		}
+		OCR3A  = 0x00ff;
 
 
-		segsum(adc_data);	//translate count to SSD format
+		segsum(count);	//translate count to SSD format
 
 		for(i=4;i>=0;i--){//bound a counter (0-4) to keep track of digit to display 
 			DDRA = 0xff;//make PORTA an output
