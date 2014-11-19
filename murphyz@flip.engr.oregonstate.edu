@@ -28,8 +28,6 @@ uint8_t check_index, mode = 0x00; //holds count for display 0; // Pointer into S
 static uint8_t enc=0; 
 int block = 0, press = 0, button=0, count_add=1;
 
-uint16_t adc_data;
-
 uint16_t count=0;
 
 void DebounceSwitch();
@@ -168,28 +166,14 @@ ISR(TIMER0_OVF_vect){
 	read_enc(KNOB1);				//interpreate encoder data and increment/decrement count
 	read_enc(KNOB2);				//interpreate encoder data and increment/decrement count
 }
-ISR(TIMER2_COMP_vect){
-count--;
-}
 
-
-ISR(ADC_vect){
-
-
-	adc_data = ADCH;
-	OCR2  = adc_data;
-
-}
 
 //initialize timercounter0
 void int0_init(){
 	TIMSK |= (1 << TCNT0);			//enable interrupts
 	TCCR0 |= (1 << CS02) | (1 << CS00); 	//normal mode, prescale by 128
-}
 
-void int2_init(){
-	TIMSK |= (1 << OCIE2);			//enable interrupts:
-	TCCR2 |= (1 << WGM21) | (1 << WGM20) | (1 << COM21) | (1 << CS21); 	//CTC mode, prescale by 128
+
 }
 
 //debouncing switch checks for 12 consecutive signals from same button before returning 1
@@ -232,24 +216,13 @@ void segsum(uint16_t sum) {
 
 }
 
-void adc_init(){
-	PORTF |= (1 << 2);
-	DDRF &= ~(1 << 2);
-	ADCSR |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
-	ADCSR |= (1 << ADEN);
-	ADCSR |= (1 << ADFR);
-	ADMUX = 0x62;
-	ADCSR |= (1 << ADIE);
-	ADCSR |= (1 << ADSC);
 
-}
 
 uint8_t main()
 {
-	int i, temp, delay;
+	int i, temp;
 
 	int0_init();
-	int2_init();
 	//set port bits 4-7 B as outputs
 	spi_init();    //initalize SPI port
 	sei();         //enable interrupts before entering loop
@@ -265,7 +238,6 @@ uint8_t main()
 	DDRE = 0xff;
 	PORTE = 0x00;
 
-	adc_init();
 	while(1)
 	{
 
@@ -302,15 +274,14 @@ uint8_t main()
 		}
 
 
-		segsum(adc_data);	//translate count to SSD format
+		segsum(count);	//translate count to SSD format
 
 		for(i=4;i>=0;i--){//bound a counter (0-4) to keep track of digit to display 
 			DDRA = 0xff;//make PORTA an output
 			PORTA = segment_data[i];//segment_data[i];
 			PORTB &= DC;
 			PORTB |= digit_data[i];//update digit to display
-			_delay_us(400);
-			PORTA = 0xff;//isegment_data[i];
+			_delay_us(750);
 		}
 	}
 
