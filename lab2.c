@@ -15,12 +15,13 @@
 #include <avr/io.h>
 #include <util/delay.h>
 #include <avr/interrupt.h>
-#include"hd44780.h"
-
-#include "ssd_data.c"
 
 #define KNOB1 4
 #define KNOB2 1
+
+#define DECIMAL 0
+#define TWELVEHOUR  1
+#define TWENTYFOURHOUR  2
 
 #define Y7 0b01110000
 #define DC 0b10001111
@@ -29,34 +30,64 @@ uint8_t debounced_state = 0; // Debounced state of the switches
 uint8_t state[MAX_CHECKS]; // Array that maintains bounce status
 uint8_t check_index, mode = 0x00; //holds count for display 0; // Pointer into State
 static uint8_t enc=0; 
-int block = 0, press = 0, button=0, count_add=1;
+int show_alarm=0, lock = 0, press = 0, button=0, count_add=1;
 
-uint16_t adc_data, audio=0;
-
-uint16_t count=0;
+uint32_t count=0, alarm=0;
 
 void DebounceSwitch();
 
 
 uint16_t bcd;
 
-extern uint8_t digit_data[5], segment_data[5], dec_to_7seg[12]; //from ssd_data.c
+//holds data for selecing different digits in the SSD
+uint8_t digit_data[5] = {
+	0b00000000,//0
+	0b00010000,//1
+	0b00100000,//:
+	0b00110000,//2
+	0b01000000 //3
+};
 
-/*****************************************************************************
-initialize SPI mode
-*****************************************************************************/
+
+//holds data to be sent to the segments. logic zero turns segment on
+uint8_t segment_data[5] = { 
+	0b11111111,
+	0b11111111,
+	0b11111111,
+	0b11111111,
+	0b11111111
+};
+
+//decimal to 7-segment LED display encodings, logic "0" turns on segment
+uint8_t dec_to_7seg[12] = {
+	0b11000000, //0
+	0b11111001, //1
+	0b10100100, //2
+	0b10110000, //3
+	0b10011001, //4
+	0b10010010, //5
+	0b10000010, //6
+	0b11111000, //7
+	0b10000000, //8
+	0b10011000, //9
+	0b11111111, //1
+	0b10011000 //9
+}; 
+//initialize SPI mode
 void spi_init(void){
 	DDRB  |=   0xff;          //Turn on SS, MOSI, SCLK
 	SPCR  |=   (1 << SPE) | (1 << MSTR);     //set up SPI mode
 	SPSR  |=   (1 << SPI2X);           // double speed operation
 }//spi_init
-/*****************************************************************************
-** Data is tranlsated from the knob's current position relative to it's last position
-*****************************************************************************/
+
+//read values from the encoder and increment count as appropriate
 void read_enc(knob){
 
 	static uint8_t enc_state1=0, enc_state2=0, enc_state;
-	uint8_t temp = (enc/knob)%4;//isolates 2 digits relevant to encoder
+	uint8_t temp = (enc/knob)%4, *target;//isolates 2 digits relevant to encoder
+
+	if(show_alarm) 	target = &alarm;
+	else		target = &count;	
 
 	if(knob == KNOB1) enc_state = enc_state1;
 	if(knob == KNOB2) enc_state = enc_state2;
@@ -72,7 +103,7 @@ void read_enc(knob){
 			if(temp == 0) enc_state++;
 			if(temp == 3){
 				enc_state++;
-				count = (count - count_add)%1024;			
+				*target = (*target - count_add)%3600;			
 			}
 			break;
 		case 2://two clicks right, two click left
@@ -82,7 +113,7 @@ void read_enc(knob){
 		case 3://three clicks right, one click left
 			if(temp == 3){
 				enc_state++;
-				count = (count + count_add)%1024;		
+				*target = (*target + count_add)%3600;			
 			}
 			if(temp == 0) enc_state--;
 			break;
@@ -93,14 +124,12 @@ void read_enc(knob){
 }
 
 
-/*****************************************************************************
-interupt service routine for timercounter0. Used to scan for button presses and data from the ecoder. I have added functions create a delay between presing a button
-and having the controller take action to prevent action from happening when trying to press two buttons at once.  
-*****************************************************************************/
+//interupt service routine for timercounter0. Used to scan for button presses and data from the ecoder. I have added functions create a delay between presing a button
+//and having the controller take action to prevent action from happening when trying to press two buttons at once.  
 ISR(TIMER0_OVF_vect){
 	static uint16_t count_7ms = 0;
 	static uint8_t  button_delay=0, button_release_delay=0;       	//delay counters to create a gap between pressing or releaseing a button and 
-									//and controller taking input from buttons
+	//and controller taking input from buttons
 	count_7ms++;
 	PORTA = 0xff;//make PORTA an input port with pullups 
 	DDRA = 0x00;
@@ -111,8 +140,8 @@ ISR(TIMER0_OVF_vect){
 
 	if(debounced_state && button==-1){				//if button is pressed and was not pressed on last check
 		button_delay++;						//wait before taking action. This Allows me to create two button presses
-									//that behave differently than one button. No action taken before user can press
-									//second button down.
+		//that behave differently than one button. No action taken before user can press
+		//second button down.
 
 		if ((button_delay > 16) && (button_release_delay > 32)){
 			button = debounced_state;
@@ -126,8 +155,8 @@ ISR(TIMER0_OVF_vect){
 
 
 	//This increments count approximately every 1 second. 
-	//	if ((count_7ms % 512)==0) //?? interrupts equals one half second 
-	//		count = (count + count_add)%1023;//bound the count to 0 - 1023
+	if ((count_7ms % 512)==0) //?? interrupts equals one half second 
+		count = (count + 1);//bound the count to 0 - 1023
 
 
 	SPDR = mode;//display current mode on bar graph
@@ -144,100 +173,51 @@ ISR(TIMER0_OVF_vect){
 	read_enc(KNOB1);				//interpreate encoder data and increment/decrement count
 	read_enc(KNOB2);				//interpreate encoder data and increment/decrement count
 }
-/*****************************************************************************
-ISR for timer/counter2: set up in fast PWM mode and toggles PE1 to create the alarm signal 
-*****************************************************************************/
-ISR(TIMER2_COMP_vect){
-	PORTE ^= (1 << 0);
+ISR(TIMER1_COMPA_vect){
+	PORTD ^= (1 << 7);
 }
 
-/*****************************************************************************
-ISR for the ADC. Whenever the adc signals a completion it stores the upper 8 bits
-*****************************************************************************/
-ISR(ADC_vect){
 
-
-	adc_data = ADCH;
-	OCR2  = adc_data;
-
-}
-
-/*****************************************************************************
-initialize timer/counter0 to run in normal mode. Scans buttons and enconders and controls the clock display value 
-*****************************************************************************/
+//initialize timercounter0
 void int0_init(){
 	TIMSK |= (1 << TCNT0);			//enable interrupts
 	TCCR0 |= (1 << CS02) | (1 << CS00); 	//normal mode, prescale by 128
-}
 
+
+}
+void int1_init() {
+	TIMSK |= (1 << OCIE1A);
+	TCCR1A = 0x00;
+	TCCR1B |= (1 << WGM12);
+	TCCR1C = 0x00;
+	OCR1A = 0x0031;
+	PORTD = 0xff;
+	DDRD = 0xff;
+} 
 /*****************************************************************************
-initialize timer/counter2 to normal mode. Creates the alarm audio signal
-*****************************************************************************/
+  initialize timer/counter2 to normal mode. Creates the alarm audio signal
+ *****************************************************************************/
 void int2_init(){
 	TIMSK |= (1 << OCIE2);			//enable interrupts:
-	TCCR2 |= (1 << WGM21) | (1 << WGM20) | (1 << COM21) | (1 << CS21); 	//CTC mode, prescale by 128
+	TCCR2 |= (1 << WGM21) | (1 << WGM20) | (1 << COM21) | (1 << CS20); 	//CTC mode, prescale by 128
 }
 
 /*****************************************************************************
-initialize timer/counter3 to fast pwm mode. Create a duty cycle to control speaker volume
-*****************************************************************************/
+  initialize timer/counter3 to fast pwm mode. Create a duty cycle to control speaker volume
+ *****************************************************************************/
 void int3_init(){
 
 	TCCR3A |= (1<<COM3A1) | (1<<COM3A0) | (1 << WGM30);//fast pwm, set on match, clear@bottom, 
 	TCCR3B |= (1<< WGM32) | (1<<CS30);// | (1 << CS31);//use ICR1 as source for TOP, use clk/1
 	TCCR3C= 0x00;                            //no forced compare 
-	ETIMSK = (1<<OCIE3A);                         //enable timer 3 interrupt on TOV
-	
-	OCR3A = 0x00a0;
-	
-}
-/*****************************************************************************
-debouncing switch checks for 12 consecutive signals from same button before returning 1
-*****************************************************************************/
-void DebounceSwitch(){
-	uint8_t i,j;
-	state[check_index++%MAX_CHECKS]=0xff - PINA;
-	j=0xff;
-	for(i=0; i<MAX_CHECKS-1;i++)j=j & state[i];
-	debounced_state = j;
-}
+	//	ETIMSK |= (1<<OCIE3A);                         //enable timer 3 interrupt on TOV
 
-
-/*****************************************************************************
-returns the display to segmentn_data in decimal
-*****************************************************************************/
-void segsum(uint16_t sum) {
-	int num_d=0, i;
-	int temp, temp2;
-	temp = sum;
-	while(sum >= (pow(10, num_d))) {num_d++;}//record number of digits
-
-
-
-	//seg segment_data array correctly
-	temp = sum/1000;
-	temp2=temp*1000;
-	segment_data[4] = dec_to_7seg[temp];
-	temp = sum - temp2;
-	temp = temp/100;
-	temp2+=temp*100;
-	segment_data[3] = dec_to_7seg[temp];
-	temp = sum - temp2;
-	temp = temp/10;
-	temp2+=temp*10;
-	segment_data[1] = dec_to_7seg[temp];
-	temp = sum - temp2;
-	segment_data[0] = dec_to_7seg[temp];
-
-	//remove leading 0's
-	if(num_d>2) {num_d++;}
-	for(i=5;i>num_d;i--) {segment_data[i-1] = 0b11111111;}	
+	OCR3A = 0x0020;
 
 }
-
 /*****************************************************************************
-initialize the ADC: freerunning mode, clock 1024 prescale
-*****************************************************************************/
+  initialize the ADC: freerunning mode, clock 1024 prescale
+ *****************************************************************************/
 void adc_init(){
 	PORTF |= (1 << 2);
 	DDRF &= ~(1 << 2);
@@ -250,21 +230,93 @@ void adc_init(){
 
 }
 
-/*****************************************************************************
-main
-*****************************************************************************/
+//debouncing switch checks for 12 consecutive signals from same button before returning 1
+void DebounceSwitch(){
+	uint8_t i,j;
+	state[check_index++%MAX_CHECKS]=0xff - PINA;
+	j=0xff;
+	for(i=0; i<MAX_CHECKS-1;i++)j=j & state[i];
+	debounced_state = j;
+}
+
+
+//returns the display to segmentn_data in decimal
+void segsum(uint16_t sum, int c_mode) {
+	int num_d=0, i, hour, min;
+	int temp, temp2, am;
+	temp = sum;
+	while(sum >= (pow(10, num_d))) {num_d++;}//record number of digits
+
+
+	switch(c_mode){
+
+		case DECIMAL:
+			//seg segment_data array correctly
+			temp = sum/1000;
+			temp2=temp*1000;
+			segment_data[4] = dec_to_7seg[temp];
+			temp = sum - temp2;
+			temp = temp/100;
+			temp2+=temp*100;
+			segment_data[3] = dec_to_7seg[temp];
+			temp = sum - temp2;
+			temp = temp/10;
+			temp2+=temp*10;
+			segment_data[1] = dec_to_7seg[temp];
+			temp = sum - temp2;
+			segment_data[0] = dec_to_7seg[temp];
+
+			//remove leading 0's
+			if(num_d>2) {num_d++;}
+			for(i=5;i>num_d;i--) {segment_data[i-1] = 0b11111111;}	
+			break;
+		case TWELVEHOUR:
+			hour = sum/60%24;
+			if(hour > 11) am = 0;
+			else am = 1;
+			hour = hour%12;
+			min = (sum)%60;
+			if (hour == 0) hour = 12;
+
+
+			segment_data[0] = dec_to_7seg[min%10];
+			segment_data[1] = dec_to_7seg[min/10];
+			segment_data[3] = dec_to_7seg[hour%10];
+			if(hour < 10) {segment_data[4] = 0b11111111;}	
+			else segment_data[4] = dec_to_7seg[hour/10];
+			break;
+
+		case TWENTYFOURHOUR:
+			hour = sum/60%24;
+			min = (sum)%60;
+
+
+
+			segment_data[0] = dec_to_7seg[min%10];
+			segment_data[1] = dec_to_7seg[min/10];
+			segment_data[3] = dec_to_7seg[hour%10];
+			if(hour < 10) {segment_data[4] = 0b11111111;}	
+			else segment_data[4] = dec_to_7seg[hour/10];
+			break;
+
+
+	}
+}
+
+
+
 uint8_t main()
 {
 	int i, temp, delay;
 
-	int0_init();
-	int2_init();
-	int3_init();
-	lcd_init();
-	//set port bits 4-7 B as outputs
+	uint8_t aset=(1 << 7), norm=0x00, t_mode=0x00;
+
+//	int0_init();
+	int1_init();
+//	int3_init();
+//	//set port bits 4-7 B as outputs
 	spi_init();    //initalize SPI port
 	sei();         //enable interrupts before entering loop
-
 
 	DDRD = 0xff;
 	DDRB = 0xff;
@@ -275,17 +327,21 @@ uint8_t main()
 	SPDR = 0x01;
 	DDRF = 0xff;
 	DDRE = 0xff;
-	PORTE = 0xff;
+	PORTE = 0x00;
 
-	adc_init();
 	while(1)
 	{
 
 
+
 		if(button>=0){ //if button is pressed toggle mode
+
+
+
 			switch(button){
 				case 1:
 					mode ^= 0x80;
+					show_alarm = 1-show_alarm;
 					break;
 				case 2:
 					mode ^= 0x40;
@@ -297,24 +353,24 @@ uint8_t main()
 			}
 			switch(mode){//control count increment value based on mode
 				case 0x00:
-					count_add = 1;
+					count_add = 0;
 					break;
 				case 0x40:
-					count_add = 2;
+					count_add = 1;
 					break;
 				case 0x20:
-					count_add = 4;
+					count_add = 2;
 					break;
 				case 0x60:
-					count_add = 0;
+					count_add = 4;
 					break;
 			}
 
 			button = -1;	//rell ISR that button has been read and can be changed
 		}
 
-
-		segsum(8888);	//translate count to SSD format
+		if(show_alarm) 	segsum(alarm, TWENTYFOURHOUR);
+		else 		segsum(count, TWENTYFOURHOUR);
 
 		for(i=4;i>=0;i--){//bound a counter (0-4) to keep track of digit to display 
 			DDRA = 0xff;//make PORTA an output
@@ -328,29 +384,4 @@ uint8_t main()
 
 	return 0;
 }
-/*
-void send_lcd(uint8_t cnd_or_char, uint8_t data, uint16_t wait);
-void send_lcd_8bit(uint8_t cnd_or_char, uint8_t data, uint16_t wait);
-void set_custom_character(uint8_t data[], uint8_t address);
-void set_cursor(uint8_t row, uint8_t col);
-void uint2lcd(uint8_t number);
-void int2lcd(int8_t number);
-void cursor_on(void);
-void cursor_off(void);
-void shift_right(void);
-void shift_left(void);
-void cursor_home(void);
-void home_line2(void);      
-void fill_spaces(void);
-void string2lcd(char *lcd_str);
-void strobe_lcd(void);
-void clear_display(void);
-void char2lcd(char a_char);
-void lcd_init(void);
-void refresh_lcd(char lcd_string_array[]);
-void lcd_int32(int32_t l, uint8_t fieldwidth, uint8_t decpos, uint8_t bSigned, uint8_t bZeroFill);
-void lcd_int16(int16_t l, uint8_t fieldwidth, uint8_t decpos, uint8_t bZeroFill);
-*/
-
-
 
