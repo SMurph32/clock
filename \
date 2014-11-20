@@ -170,6 +170,7 @@ ISR(TIMER0_OVF_vect){
 }
 ISR(TIMER2_COMP_vect){
 	PORTE ^= (1 << 0);
+	PORTE ^= (1 << 1);
 }
 
 ISR(ADC_vect){
@@ -195,10 +196,8 @@ void int3_init(){
 
 	TCCR3A |= (1<<COM3A1) | (1<<COM3A0) | (1 << WGM30);//fast pwm, set on match, clear@bottom, 
 	TCCR3B |= (1<< WGM32) | (1<<CS30);// | (1 << CS31);//use ICR1 as source for TOP, use clk/1
-	TCCR3C= 0x00;                            //no forced compare 
+	TCCR1C = 0x00;                            //no forced compare 
 	ETIMSK = (1<<OCIE3A);                         //enable timer 3 interrupt on TOV
-	
-	OCR3A = 0x00a0;
 	
 }
 //debouncing switch checks for 12 consecutive signals from same button before returning 1
@@ -310,9 +309,10 @@ uint8_t main()
 
 			button = -1;	//rell ISR that button has been read and can be changed
 		}
+		OCR3A  = 0x00ff;
 
 
-		segsum(8888);	//translate count to SSD format
+		segsum(count);	//translate count to SSD format
 
 		for(i=4;i>=0;i--){//bound a counter (0-4) to keep track of digit to display 
 			DDRA = 0xff;//make PORTA an output
