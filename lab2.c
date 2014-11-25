@@ -188,7 +188,7 @@ void int0_init(){
 void int1_init() {
 	TIMSK |= (1 << OCIE1A);
 	TCCR1A = 0x00;
-	TCCR1B |= (1 << WGM12);
+	TCCR1B |= (1 << WGM12) | (1 << CS11) | (1 << CS10);
 	TCCR1C = 0x00;
 	OCR1A = 0x0031;
 	PORTD = 0xff;
@@ -311,10 +311,10 @@ uint8_t main()
 
 	uint8_t aset=(1 << 7), norm=0x00, t_mode=0x00;
 
-//	int0_init();
+	int0_init();
 	int1_init();
-//	int3_init();
-//	//set port bits 4-7 B as outputs
+	int3_init();
+	//set port bits 4-7 B as outputs
 	spi_init();    //initalize SPI port
 	sei();         //enable interrupts before entering loop
 
