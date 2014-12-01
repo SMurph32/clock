@@ -26,7 +26,6 @@ set cursor position                             0x80+position
 
 #define CMD_BYTE  0
 #define DATA_BYTE 1
-
 //The hardware port configuration for 4-bit operation is assumed 
 //to be all on one port.  Control lines are assumed to be in the
 //lower nibble.  The control lines may be in another order but 
@@ -34,7 +33,7 @@ set cursor position                             0x80+position
 //lines are asuumed to be in the upper nibble with MSB of LCD
 //aligned with the port MSB. (bit 7 is MSB on both) Bit zero of
 //LCD_PORT is unused. 
-#define LCD_PORT           PORTD
+#define LCD_PORT           PORD
 #define LCD_PORT_DDR       DDRD 
 #define LCD_CMD_DATA_BIT   1    //zero is command, one is data
 #define LCD_RDWR_BIT       2    //zero is write,   one is read
