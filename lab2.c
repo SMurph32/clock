@@ -34,7 +34,7 @@ uint8_t debounced_state = 0; // Debounced state of the switches
 uint8_t state[MAX_CHECKS]; // Array that maintains bounce status
 uint8_t check_index, mode = 0x00; //holds count for display 0; // Pointer into State
 static uint8_t enc=0; 
-int am=0, aam=0, show_alarm=0, lock = 0, press = 0, button=0, count_add=1;
+int dim, am=0, aam=0, show_alarm=0, lock = 0, press = 0, button=0, count_add=1;
 
 uint16_t count=0, alarm=0;
 
@@ -165,8 +165,8 @@ ISR(TIMER0_OVF_vect){
 
 
 	//This increments count approximately every 1 second. 
-	//	if ((count_7ms % 512)==0) //?? interrupts equals one half second 
-	//		count = (count + 1);//bound the count to 0 - 1023
+	if ((count_7ms % 512)==0) //?? interrupts equals one half second 
+		count = (count + 1);//bound the count to 0 - 1023
 
 	if(mode & (1 << 7)) SPDR = mode | (aam << 1);//display current mode on bar graph
 	else SPDR = mode | (am << 1);
@@ -186,9 +186,11 @@ ISR(TIMER0_OVF_vect){
 	if((am_change <= 100 && count >700) || (am_change > 700 && count <= 100)) am = 1-am;
 	if((aam_change <= 100 && alarm >700) || (aam_change > 700 && alarm <= 100)) aam = 1-aam;
 }
+
 ISR(TIMER1_COMPA_vect){
 	PORTD ^= (1 << 7);
 }
+
 
 
 //initialize timercounter0
@@ -211,8 +213,11 @@ void int1_init() {
   initialize timer/counter2 to normal mode. Creates the alarm audio signal
  *****************************************************************************/
 void int2_init(){
-	TIMSK |= (1 << OCIE2);			//enable interrupts:
+//	TIMSK |= (1 << OCIE2);			//enable interrupts:
+	TCCR2 |= (1 << CS20); 
 	TCCR2 |= (1 << WGM21) | (1 << WGM20) | (1 << COM21) | (1 << CS20); 	//CTC mode, prescale by 128
+	TCCR2 &= ~(1 << FOC2);
+	OCR2 = 0xff;
 }
 
 /*****************************************************************************
@@ -232,15 +237,22 @@ void int3_init(){
   initialize the ADC: freerunning mode, clock 1024 prescale
  *****************************************************************************/
 void adc_init(){
-	PORTF |= (1 << 2);
+	PORTF = 0xff; 
 	DDRF &= ~(1 << 2);
-	ADCSR |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
-	//	ADCSR |= (1 << ADEN);
 	ADCSR |= (1 << ADFR);
-	ADMUX = 0x62;
+	ADCSR |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
+	ADMUX = 0x02;
+	ADMUX |= (1 << REFS0);
+	ADMUX |= (1 << ADLAR);
+	ADCSR |= (1 << ADEN);
 	ADCSR |= (1 << ADIE);
 	ADCSR |= (1 << ADSC);
 
+}
+ISR(ADC_vect){
+	int temp = ADCH;
+	if(temp > 350) temp = 350;
+	OCR2 = temp;
 }
 
 //debouncing switch checks for 12 consecutive signals from same button before returning 1
@@ -329,7 +341,9 @@ uint8_t main()
 
 	int0_init();
 	int1_init();
+	int2_init();
 	int3_init();
+	adc_init();
 	//set port bits 4-7 B as outputs
 	spi_init();    //initalize SPI port
 	sei();         //enable interrupts before entering loop
@@ -341,10 +355,13 @@ uint8_t main()
 	DDRA = 0xff;
 	PORTA = 0x00;
 	SPDR = 0x01;
-	DDRF = 0xff;
+	DDRF = 0xfb;
 	DDRE = 0xff;
 	PORTE = 0x00;
+	
+	PORTF &= ~(1 << 0);
 
+	
 	while(1)
 	{
 
@@ -403,7 +420,7 @@ uint8_t main()
 			PORTB |= digit_data[i];//update digit to display
 			_delay_us(300);
 			PORTA = 0xff;//isegment_data[i];
-			_delay_us(400);
+			_delay_us(200);
 		}
 		//		sei();         //enable interrupts before entering loop
 	}
