@@ -34,9 +34,9 @@ uint8_t debounced_state = 0; // Debounced state of the switches
 uint8_t state[MAX_CHECKS]; // Array that maintains bounce status
 uint8_t check_index, mode = 0x00; //holds count for display 0; // Pointer into State
 static uint8_t enc=0; 
-int am=0, aam=0, show_alarm=0, lock = 0, press = 0, button=0, count_add=1;
+int digits,am=0, aam=0, show_alarm=0, show_volume=0, lock = 0, press = 0, button=0, count_add=1;
 
-uint16_t count=0, alarm=0;
+uint16_t count=0, alarm=0, temp, volume=0;
 
 void DebounceSwitch();
 
@@ -92,6 +92,7 @@ void read_enc(knob){
 
 
 	if(show_alarm) 	target = &alarm;
+	if(show_volume) target = &volume;
 	else		target = &count;	
 
 	if(knob == KNOB1) enc_state = enc_state1;
@@ -266,6 +267,7 @@ void segsum(uint32_t sum, int c_mode, int am_s) {
 	temp = sum;
 	while(sum >= (pow(10, num_d))) {num_d++;}//record number of digits
 
+	digits = num_d;
 
 	switch(c_mode){
 
@@ -323,7 +325,7 @@ void segsum(uint32_t sum, int c_mode, int am_s) {
 
 uint8_t main()
 {
-	int i, temp, delay;
+	int i, temp, delay, d=0;
 
 	uint8_t aset=(1 << 7), norm=0x00, t_mode=0x00;
 
@@ -373,6 +375,9 @@ uint8_t main()
 				case 32:
 					alarm_on();
 					break;
+				case 64:
+					show_volume = 1 - show_volume;
+					break;
 			}
 			switch(mode & (0X7f)){//control count increment value based on mode
 				case 0x00:
@@ -392,20 +397,24 @@ uint8_t main()
 			button = -1;	//rell ISR that button has been read and can be changed
 		}
 
-		if(show_alarm) 	segsum(alarm, 2, aam);
-		else 		segsum(count, 2, am);
+		OCR3A = volume;
 
-		//		sei();         //enable interrupts before entering loop
-		for(i=4;i>=0;i--){//bound a counter (0-4) to keep track of digit to display 
-			DDRA = 0xff;//make PORTA an output
-			PORTA = segment_data[i];//segment_data[i];
-			PORTB &= DC;
-			PORTB |= digit_data[i];//update digit to display
-			_delay_us(300);
-			PORTA = 0xff;//isegment_data[i];
-			_delay_us(400);
-		}
-		//		sei();         //enable interrupts before entering loop
+	
+		if(show_volume) 	segsum(volume, 0, 0);
+		else if(show_alarm) 	segsum(alarm, 2, aam);
+		else 			segsum(count, 2, am);
+
+
+
+		i = (i + 1)%5;
+
+		DDRA = 0xff;//make PORTA an output
+		PORTB &= DC;
+		PORTB |= digit_data[i];//update digit to display
+		_delay_us(100);
+		PORTA = segment_data[i];//segment_data[i];
+		_delay_us(500);
+		PORTA = 0xff;//isegment_data[i];
 	}
 
 
