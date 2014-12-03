@@ -242,7 +242,7 @@ void adc_init(){
 	PORTF |= (1 << 2);
 	DDRF &= ~(1 << 2);
 	ADCSR |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
-	//	ADCSR |= (1 << ADEN);
+	ADCSR |= (1 << ADEN);
 	ADCSR |= (1 << ADFR);
 	ADMUX = 0x62;
 	ADCSR |= (1 << ADIE);
@@ -306,6 +306,7 @@ void segsum(uint32_t sum, int c_mode, int am_s) {
 
 			//remove leading 0's
 			if(num_d>2) {num_d++;}
+			if(num_d == 0) num_d=1;
 			for(i=5;i>num_d;i--) {segment_data[i-1] = 0b11111111;}	
 			break;
 		case TWELVEHOUR:
@@ -346,16 +347,17 @@ uint8_t main()
 
 	uint8_t aset=(1 << 7), norm=0x00, t_mode=0x00, alarm_temp;
 	int0_init();
-	#ifndef MUSIC
+#ifndef MUSIC
 	int1_init();
-	#endif
-	#ifdef MUSIC
+#endif
+#ifdef MUSIC
 	music_init();
-	#endif
+#endif
 	int3_init();
 	LCD_Init();
 	LCD_Clr();
-	
+	adc_init();
+
 	//set port bits 4-7 B as outputs
 	spi_init();    //initalize SPI port
 	sei();         //enable interrupts before entering loop
@@ -471,17 +473,15 @@ uint8_t main()
 		else if(show_alarm) 	segsum(alarm, tt+1, aam);
 		else 			segsum(count, tt+1, am);
 
-
-
 		i = (i + 1)%5;
 
 		DDRA = 0xff;//make PORTA an output
 		PORTB &= DC;
 		PORTB |= digit_data[i];//update digit to display
-		_delay_us(100);
 		PORTA = segment_data[i];//segment_data[i];
-		_delay_us(500);
+		_delay_us(300);
 		PORTA = 0xff;//isegment_data[i];
+
 	}
 
 
