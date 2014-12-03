@@ -239,15 +239,21 @@ void int3_init(){
   initialize the ADC: freerunning mode, clock 1024 prescale
  *****************************************************************************/
 void adc_init(){
-	PORTF |= (1 << 2);
+	PORTF = 0xff;
 	DDRF &= ~(1 << 2);
-	ADCSR |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
-	ADCSR |= (1 << ADEN);
 	ADCSR |= (1 << ADFR);
-	ADMUX = 0x62;
+	ADCSR |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
+	ADMUX = 0x02;
+	ADMUX |= (1 << REFS0);
+	ADMUX |= (1 << ADLAR);
+	ADCSR |= (1 << ADEN);
 	ADCSR |= (1 << ADIE);
 	ADCSR |= (1 << ADSC);
-
+}
+ISR(ADC_vect){
+	int temp = ADCH;
+	if(temp > 350) temp = 350;
+	OCR2 = temp;
 }
 
 //debouncing switch checks for 12 consecutive signals from same button before returning 1
@@ -353,6 +359,7 @@ uint8_t main()
 #ifdef MUSIC
 	music_init();
 #endif
+	int2_init();
 	int3_init();
 	LCD_Init();
 	LCD_Clr();
@@ -369,7 +376,6 @@ uint8_t main()
 	DDRA = 0xff;
 	PORTA = 0x00;
 	SPDR = 0x01;
-	DDRF = 0xff;
 	DDRE = 0xff;
 	PORTE = 0x00;
 
