@@ -218,7 +218,6 @@ void int1_init() {
   initialize timer/counter2 to normal mode. Creates the alarm audio signal
  *****************************************************************************/
 void int2_init(){
-	TIMSK |= (1 << OCIE2);			//enable interrupts:
 	TCCR2 |= (1 << WGM21) | (1 << WGM20) | (1 << COM21) | (1 << CS20); 	//CTC mode, prescale by 128
 }
 
@@ -378,13 +377,14 @@ uint8_t main()
 	SPDR = 0x01;
 	DDRE = 0xff;
 	PORTE = 0x00;
+	PORTF = 0xfc;
 
-
+	
 	ar_last = arm;
 	while(1)
 	{
 
-
+		//only update display if there is a change
 		if(ar_last!=arm){
 
 			if(arm){
@@ -398,31 +398,32 @@ uint8_t main()
 			ar_last = arm;
 		}
 
+		
 		if(button>=0){ //if button is pressed toggle mode
 
 
 			switch(button){
-				case 1:
+				case 1://push to show alarm and make changes
 					mode ^= 0x80;
 					show_alarm = 1-show_alarm;
 					break;
-				case 2:
+				case 2://push to increment by 1 or 4
 					mode ^= 0x40;
 					break;
-				case 4:
+				case 4://push to increment by 2 or 4 
 					mode ^= 0x20;
 					break;
-				case 16:
+				case 16://turn off alarm
 					alarm_off();
 					tt=1-tt;
 					break;
-				case 32:
+				case 32://turn on alarm
 					alarm_on();
 					break;
-				case 64:
+				case 64://display and make changes to volume
 					show_volume = 1 - show_volume;
 					break;
-				case 8 :
+				case 8 ://snooze if alarm is going off and disarm alarm if it is not currently going off
 					if(alerting){
 						if(a_t==0){
 							alarm_temp = alarm;
@@ -464,28 +465,32 @@ uint8_t main()
 		}
 
 
-		if(volume>600 || volume<150) volume = 150;
+		if(volume>600 || volume<150) volume = 150;//keep volume between 150 and 250
 		else if(volume > 250) volume = 250;
 
-		OCR3A = volume;
+		OCR3A = volume;//set volume
 
 
-		if(arm && alarm == count && show_alarm==0){ 
+		if(arm && alarm == count && show_alarm==0){ //set off alarm if armed
 			alarm_on();	
 			alerting=1;	
 		}
 
+	
+		//update display
 		if(show_volume) 	segsum(0xfa-volume, 0, 0);
 		else if(show_alarm) 	segsum(alarm, tt+1, aam);
 		else 			segsum(count, tt+1, am);
 
+
+		//display
 		i = (i + 1)%5;
 
 		DDRA = 0xff;//make PORTA an output
 		PORTB &= DC;
 		PORTB |= digit_data[i];//update digit to display
 		PORTA = segment_data[i];//segment_data[i];
-		_delay_us(300);
+		_delay_us(200);
 		PORTA = 0xff;//isegment_data[i];
 
 	}
