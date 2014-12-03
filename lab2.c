@@ -371,8 +371,11 @@ uint8_t main()
 	DDRE = 0xff;
 	PORTE = 0x00;
 
+
+	ar_last = arm;
 	while(1)
 	{
+
 
 		if(ar_last!=arm){
 
@@ -470,17 +473,14 @@ uint8_t main()
 
 
 
-		//i = (i + 1)%5;
-		DDRA = 0xff;//make PORTA an output
+		i = (i + 1)%5;
 
-		for(i=0;i<5;i++){
-			PORTB &= DC;
-			PORTB |= digit_data[i];//update digit to display
-			PORTA = segment_data[i];//segment_data[i];
-			_delay_ms(2);
-		PORTA = 0xff;//isegment_data[i];
-			_delay_ms(2);
-		}
+		DDRA = 0xff;//make PORTA an output
+		PORTB &= DC;
+		PORTB |= digit_data[i];//update digit to display
+		_delay_us(100);
+		PORTA = segment_data[i];//segment_data[i];
+		_delay_us(500);
 		PORTA = 0xff;//isegment_data[i];
 	}
 
