@@ -15,8 +15,8 @@
 #include <avr/io.h>
 #include <util/delay.h>
 #include <avr/interrupt.h>
-#include "hd44780.c"
-
+#include "LCDDriver.h"
+#include "kellen_music.c"
 
 #define KNOB1 4
 #define KNOB2 1
@@ -30,13 +30,16 @@
 
 #define MODCAP 720
 
+#define MUSIC
+
+
 uint8_t debounced_state = 0; // Debounced state of the switches
 uint8_t state[MAX_CHECKS]; // Array that maintains bounce status
 uint8_t check_index, mode = 0x00; //holds count for display 0; // Pointer into State
 static uint8_t enc=0; 
 int digits,am=0, aam=0, show_alarm=0, show_volume=0, lock = 0, press = 0, button=0, count_add=1;
 
-uint16_t count=0, alarm=0, temp, volume=0;
+uint16_t count=0, alarm=0, temp, volume=0xfa;
 
 void DebounceSwitch();
 
@@ -73,8 +76,8 @@ uint8_t dec_to_7seg[12] = {
 	0b11111000, //7
 	0b10000000, //8
 	0b10011000, //9
-	0b11111111, //1
-	0b10011000 //9
+	0b10000011, //'
+	0b10000100 //:
 }; 
 //initialize SPI mode
 void spi_init(void){
@@ -91,8 +94,8 @@ void read_enc(knob){
 	int16_t *target;//isolates 2 digits relevant to encoder
 
 
-	if(show_alarm) 	target = &alarm;
 	if(show_volume) target = &volume;
+	else if(show_alarm) 	target = &alarm;
 	else		target = &count;	
 
 	if(knob == KNOB1) enc_state = enc_state1;
@@ -166,9 +169,12 @@ ISR(TIMER0_OVF_vect){
 
 
 	//This increments count approximately every 1 second. 
-	//	if ((count_7ms % 512)==0) //?? interrupts equals one half second 
-	//		count = (count + 1);//bound the count to 0 - 1023
-
+	if ((count_7ms % 512)==0){ //?? interrupts equals one half second 
+		count = (count + 1);//bound the count to 0 - 1023
+		segment_data[2] ^= 0x03;
+	}
+	if ((count_7ms % 20)==0) //?? interrupts equals one half second 
+		beat++;
 	if(mode & (1 << 7)) SPDR = mode | (aam << 1);//display current mode on bar graph
 	else SPDR = mode | (am << 1);
 
@@ -187,10 +193,11 @@ ISR(TIMER0_OVF_vect){
 	if((am_change <= 100 && count >700) || (am_change > 700 && count <= 100)) am = 1-am;
 	if((aam_change <= 100 && alarm >700) || (aam_change > 700 && alarm <= 100)) aam = 1-aam;
 }
+#ifndef MUSIC
 ISR(TIMER1_COMPA_vect){
 	PORTD ^= (1 << 7);
 }
-
+#endif
 
 //initialize timercounter0
 void int0_init(){
@@ -200,7 +207,6 @@ void int0_init(){
 
 }
 void int1_init() {
-	TIMSK |= (1 << OCIE1A);
 	TCCR1A = 0x00;
 	TCCR1B |= (1 << WGM12) | (1 << CS11) | (1 << CS10);
 	TCCR1C = 0x00;
@@ -253,11 +259,22 @@ void DebounceSwitch(){
 	debounced_state = j;
 }
 void alarm_on(){
+	#ifndef MUSIC
 	TIMSK |= (1 << OCIE1A);
+	#endif
+	#ifdef MUSIC
+	music_on();
+	#endif
+	
 }
 
 void alarm_off(){
+	#ifndef MUSIC
 	TIMSK &= ~(1 << OCIE1A);
+	#endif
+	#ifdef MUSIC
+	music_off();
+	#endif
 }
 //returns the display to segmentn_data in decimal
 void segsum(uint32_t sum, int c_mode, int am_s) {
@@ -325,13 +342,20 @@ void segsum(uint32_t sum, int c_mode, int am_s) {
 
 uint8_t main()
 {
-	int i, temp, delay, d=0;
+	int i, temp, delay, d=0, arm=0, alerting=0, a_t=0, tt=0, ar_last;
 
-	uint8_t aset=(1 << 7), norm=0x00, t_mode=0x00;
-
+	uint8_t aset=(1 << 7), norm=0x00, t_mode=0x00, alarm_temp;
 	int0_init();
+	#ifndef MUSIC
 	int1_init();
+	#endif
+	#ifdef MUSIC
+	music_init();
+	#endif
 	int3_init();
+	LCD_Init();
+	LCD_Clr();
+	
 	//set port bits 4-7 B as outputs
 	spi_init();    //initalize SPI port
 	sei();         //enable interrupts before entering loop
@@ -350,7 +374,18 @@ uint8_t main()
 	while(1)
 	{
 
+		if(ar_last!=arm){
 
+			if(arm){
+				LCD_Clr();
+				LCD_PutStr("Alarm on!");
+			}else{
+				LCD_Clr();
+				LCD_PutStr("Alarm off");
+			}
+
+			ar_last = arm;
+		}
 
 		if(button>=0){ //if button is pressed toggle mode
 
@@ -363,14 +398,12 @@ uint8_t main()
 				case 2:
 					mode ^= 0x40;
 					break;
-				case 8 :
-					mode ^= 0x01;
-					break;
 				case 4:
 					mode ^= 0x20;
 					break;
 				case 16:
 					alarm_off();
+					tt=1-tt;
 					break;
 				case 32:
 					alarm_on();
@@ -378,8 +411,30 @@ uint8_t main()
 				case 64:
 					show_volume = 1 - show_volume;
 					break;
+				case 8 :
+					if(alerting){
+						if(a_t==0){
+							alarm_temp = alarm;
+							a_t=1;						
+						}
+						alarm = (count + 10)%MODCAP;
+						alarm_off();
+						alerting=0;
+					}
+					else {
+						if(arm){
+							if(a_t){
+								alarm=alarm_temp;
+								a_t=0;
+							}
+							arm=0;
+						}
+						else arm=1;
+						mode ^= 0x01;
+					}
+					break;
 			}
-			switch(mode & (0X7f)){//control count increment value based on mode
+			switch(mode & (0x7e)){//control count increment value based on mode
 				case 0x00:
 					count_add = 0;
 					break;
@@ -397,23 +452,35 @@ uint8_t main()
 			button = -1;	//rell ISR that button has been read and can be changed
 		}
 
+
+		if(volume>600 || volume<150) volume = 150;
+		else if(volume > 250) volume = 250;
+
 		OCR3A = volume;
 
-	
-		if(show_volume) 	segsum(volume, 0, 0);
-		else if(show_alarm) 	segsum(alarm, 2, aam);
-		else 			segsum(count, 2, am);
+
+		if(arm && alarm == count && show_alarm==0){ 
+			alarm_on();	
+			alerting=1;	
+		}
+
+		if(show_volume) 	segsum(0xfa-volume, 0, 0);
+		else if(show_alarm) 	segsum(alarm, tt+1, aam);
+		else 			segsum(count, tt+1, am);
 
 
 
-		i = (i + 1)%5;
-
+		//i = (i + 1)%5;
 		DDRA = 0xff;//make PORTA an output
-		PORTB &= DC;
-		PORTB |= digit_data[i];//update digit to display
-		_delay_us(100);
-		PORTA = segment_data[i];//segment_data[i];
-		_delay_us(500);
+
+		for(i=0;i<5;i++){
+			PORTB &= DC;
+			PORTB |= digit_data[i];//update digit to display
+			PORTA = segment_data[i];//segment_data[i];
+			_delay_ms(2);
+		PORTA = 0xff;//isegment_data[i];
+			_delay_ms(2);
+		}
 		PORTA = 0xff;//isegment_data[i];
 	}
 
