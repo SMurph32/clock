@@ -1,72 +1,44 @@
-PRG             =thermo3_skel
-
-OBJS            =thermo3_skel.o lcd_functions.o lm73_functions_skel.o twi_master.o 
-
-
-SRCS            =thermo3_skel.c lcd_functions.c lm73_functions_skel.c twi_master.c 
-
+SHELL               	= /bin/bash
+PRG             	= code
+OBJS            	= code.o lm73_functions_skel.o twi_master.o 
+SRCS            	= code.c lm73_functions_skel.c twi_master.c 
 MCU_TARGET     = atmega128
-#MCU_TARGET     = atmega48
-PROGRAMMER_TARGET     = m128
-#PROGRAMMER_TARGET     = m48
+MCU_TARGET          	= atmega48
+F_CPU               	= 8000000UL
+PROGRAMMER_TARGET   	= m48
 
 #agressive optimization
 OPTIMIZE       = -O0    # options are 1, 2, 3, s
 #optimize for small code
 #OPTIMIZE       = -Os    # options are 1, 2, 3, s
-#OPTIMIZE       = -1s    # options are 1, 2, 3, s
 
-F_CPU          = 8000000UL
-
-DEFS           =
-LIBS           =
-
-CC             = avr-gcc
+DEFS                =
+LIBS                =
+CC                  = avr-gcc
 
 # Override is only needed by avr-lib build system.
-
 override CFLAGS        = -g -Wall $(OPTIMIZE) -mmcu=$(MCU_TARGET) $(DEFS) -DF_CPU=$(F_CPU)
 override LDFLAGS       = -Wl,-Map,$(PRG).map
 
 OBJCOPY        = avr-objcopy
 OBJDUMP        = avr-objdump
 
-all: $(PRG).elf lst text eeprom
+all: $(PRG).elf lst text eeprom  
 
 $(PRG).elf: $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 #prevent confusion with any file named "clean"
-#"-" prevents erroring out with file not found
+#the dash "-" prevents rm from erroring out with file not found
 .PHONY	: clean
 clean: 
-	-rm -rf $(PRG).o $(PRG).elf 
-	-rm -rf $(PRG).lst $(PRG).map 
-	-rm -rf $(PRG).srec $(PRG)*.bin $(PRG).hex 
-	-rm -rf $(PRG)_eeprom.srec $(PRG)_eeprom*.bin $(PRG)_eeprom.hex 
+	-rm -rf $(PRG).o $(PRG).elf $(PRG).lst $(PRG).map $(PRG).srec $(PRG)*.bin
+	-rm -rf $(PRG)_eeprom.srec $(PRG)_eeprom*.bin $(PRG)_eeprom.hex $(PRG).hex 
+	-rm -rf $(PRG).d
 
+#clean entire directory
 all_clean:
-	rm -rf *.o *.elf *.lst *.map *.srec *.bin *.hex
-
-#setup for usb programmer
-#hacked the permissions for stinkin' Redhat box
-program: $(PRG).hex
-	chmod 644 $(PRG).hex
-#	avrdude -p $(PROGRAMMER_TARGET) -c usbasp -e -U flash:w:$(PRG).hex 
-#	avrdude -p $(PROGRAMMER_TARGET) -c osuisp2 -e -U flash:w:$(PRG).hex 
-	sudo /usr/local/avrdude/avrdude -C /usr/local/avrdude/avrdude.conf -P usb -c osuisp2 -p m128 e- -U flash:w:$(PRG).hex -v
-
-lst:  $(PRG).lst
-
-%.lst: %.elf
-	$(OBJDUMP) -h -S $< > $@
-
-
-#put dependencies on header files in here
-#there must be a better way to do this!
-#lm73_functions.o thermo2.o :  lm73_functions.h
-#lcd_functions.o thermo2.o  :  lcd_functions.h
-#thermo2.o                  :  twi_master.h
+	rm -rf *.o *.elf *.lst *.map *.srec *.bin *.hex *.d
 
 #Here is the pattern rule to generate a file of dependencies (i.e., a makefile) 
 #called `name.d' from a C source file +called `name.c':
@@ -77,7 +49,22 @@ lst:  $(PRG).lst
 	rm -f $@.$$$$
 
 #include the dependencies from the other makefiles
-include $(SRCS:.c=.d)
+#include $(SRCS:.c=.d)
+
+#setup for usb programmer
+program: $(PRG).hex 
+#	avrdude -p $(PROGRAMMER_TARGET) -c usbasp -e -U flash:w:$(PRG).hex 
+#	avrdude -p $(PROGRAMMER_TARGET) -c usbasp -e -U flash:w:$(PRG).hex \
+                                                     -U eeprom:w:$(PRG)_eeprom.hex
+	sudo /usr/local/avrdude/avrdude -C /usr/local/avrdude/avrdude.conf -P usb -c osuisp2 -p m48 e- -U flash:w:$(PRG).hex -v
+#	avrdude -p $(PROGRAMMER_TARGET) -c osuisp2 -e -U flash:w:$(PRG).hex 
+	make clean
+lst:  $(PRG).lst
+
+%.lst: %.elf
+	$(OBJDUMP) -h -S $< > $@
+
+# Rules for building the .text rom images
 
 text: hex bin srec
 
